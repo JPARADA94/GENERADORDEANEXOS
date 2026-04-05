@@ -6,15 +6,20 @@ from typing import List, Tuple
 
 import streamlit as st
 from PIL import Image, ImageOps
-from docx import Document
-from docx.enum.section import WD_SECTION
-from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.shared import Inches, Pt
 from reportlab.lib.pagesizes import letter
 from reportlab.lib.utils import ImageReader
 from reportlab.pdfbase.pdfmetrics import stringWidth
 from reportlab.pdfgen import canvas
+
+try:
+    from docx import Document
+    from docx.enum.section import WD_SECTION
+    from docx.enum.table import WD_CELL_VERTICAL_ALIGNMENT, WD_TABLE_ALIGNMENT
+    from docx.enum.text import WD_ALIGN_PARAGRAPH
+    from docx.shared import Inches, Pt
+    WORD_AVAILABLE = True
+except Exception:
+    WORD_AVAILABLE = False
 
 # =========================================================
 # App: Generador de anexos de videoscopía
@@ -48,14 +53,14 @@ OUTER_MARGIN = mm_to_pt(12)
 GAP_X = mm_to_pt(6)
 GAP_Y = mm_to_pt(8)
 FOOTER_H = mm_to_pt(14)
-TITLE_H = mm_to_pt(11)
+HEADER_H = mm_to_pt(20)
 TOP_EXTRA = mm_to_pt(6)
 
 USABLE_W = PAGE_W - (2 * OUTER_MARGIN)
-USABLE_H = PAGE_H - (2 * OUTER_MARGIN) - FOOTER_H - TOP_EXTRA
+USABLE_H = PAGE_H - (2 * OUTER_MARGIN) - FOOTER_H - HEADER_H - TOP_EXTRA
 BOX_W = (USABLE_W - GAP_X) / COLUMNS
 CELL_H = (USABLE_H - (GAP_Y * (ROWS - 1))) / ROWS
-IMAGE_BOX_H = CELL_H - TITLE_H
+IMAGE_BOX_H = CELL_H
 
 
 # -----------------------------
@@ -120,6 +125,14 @@ def truncar_texto(pdf: canvas.Canvas, text: str, max_width: float, font_name="He
     return (out + suffix) if out else suffix
 
 
+def construir_titulo_documento(cilindro: str) -> str:
+    base = "ANEXOS FOTOGRÁFICO VIDEOSCOPIA CILINDRO"
+    cilindro = cilindro.strip()
+    if cilindro:
+        return f"{base} {cilindro}"
+    return f"{base} X"
+
+
 
 def obtener_logo_fuente(logo_file):
     if logo_file is not None:
@@ -143,6 +156,17 @@ def preparar_logo_pdf(logo_file, max_width=mm_to_pt(24), max_height=mm_to_pt(10)
 # -----------------------------
 # PDF
 # -----------------------------
+def dibujar_header(pdf: canvas.Canvas, cilindro: str):
+    titulo = construir_titulo_documento(cilindro)
+    titulo = truncar_texto(pdf, titulo, USABLE_W, font_name="Helvetica-Bold", font_size=13)
+    y = PAGE_H - OUTER_MARGIN - mm_to_pt(4)
+    pdf.setFont("Helvetica-Bold", 13)
+    pdf.drawCentredString(PAGE_W / 2, y, titulo)
+    line_y = y - mm_to_pt(5)
+    pdf.setLineWidth(0.8)
+    pdf.line(OUTER_MARGIN, line_y, PAGE_W - OUTER_MARGIN, line_y)
+
+
 def dibujar_footer(pdf: canvas.Canvas, campo: str, logo_reader, logo_w: float, logo_h: float):
     line_y = OUTER_MARGIN + FOOTER_H - mm_to_pt(2)
     pdf.setLineWidth(0.5)
@@ -173,7 +197,7 @@ def dibujar_footer(pdf: canvas.Canvas, campo: str, logo_reader, logo_w: float, l
 
 
 
-def generar_pdf(registros, campo: str, logo_file) -> bytes:
+def generar_pdf(registros, campo: str, logo_file, cilindro: str) -> bytes:
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=letter)
     logo_reader, logo_w, logo_h = preparar_logo_pdf(logo_file)
@@ -185,19 +209,15 @@ def generar_pdf(registros, campo: str, logo_file) -> bytes:
         end = start + MAX_PER_PAGE
         lote = registros[start:end]
 
+        dibujar_header(pdf, cilindro)
+
         for i, item in enumerate(lote):
             row = i // COLUMNS
             col = i % COLUMNS
 
             x = OUTER_MARGIN + col * (BOX_W + GAP_X)
-            y_top = PAGE_H - OUTER_MARGIN - TOP_EXTRA - row * (CELL_H + GAP_Y)
+            y_top = PAGE_H - OUTER_MARGIN - HEADER_H - TOP_EXTRA - row * (CELL_H + GAP_Y)
             y_cell = y_top - CELL_H
-
-            nombre = item["nombre"].strip() if item["nombre"].strip() else item["nombre_base"]
-            nombre = truncar_texto(pdf, nombre, BOX_W, font_name="Helvetica-Bold", font_size=10)
-
-            pdf.setFont("Helvetica-Bold", 10)
-            pdf.drawCentredString(x + (BOX_W / 2), y_top - mm_to_pt(4), nombre)
 
             img = abrir_imagen(item["file"])
             draw_w, draw_h = calcular_ajuste(img.width, img.height, BOX_W, IMAGE_BOX_H)
@@ -261,7 +281,10 @@ def agregar_logo_a_word(parrafo, logo_file, width_in=0.9):
 
 
 
-def generar_docx(registros, campo: str, logo_file) -> bytes:
+def generar_docx(registros, campo: str, logo_file, cilindro: str) -> bytes:
+    if not WORD_AVAILABLE:
+        return b""
+
     doc = Document()
     section = doc.sections[0]
     section.page_width = Inches(8.5)
@@ -276,8 +299,16 @@ def generar_docx(registros, campo: str, logo_file) -> bytes:
     style.font.size = Pt(9)
 
     total_paginas = math.ceil(len(registros) / MAX_PER_PAGE)
+    titulo_doc = construir_titulo_documento(cilindro)
 
     for page_idx in range(total_paginas):
+        p_header = doc.add_paragraph()
+        p_header.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        p_header.space_after = Pt(8)
+        r_header = p_header.add_run(titulo_doc)
+        r_header.bold = True
+        r_header.font.size = Pt(13)
+
         start = page_idx * MAX_PER_PAGE
         end = start + MAX_PER_PAGE
         lote = registros[start:end]
@@ -287,7 +318,7 @@ def generar_docx(registros, campo: str, logo_file) -> bytes:
         tabla.autofit = False
 
         for row in tabla.rows:
-            row.height = Inches(2.35)
+            row.height = Inches(2.45)
             for cell in row.cells:
                 cell.width = Inches(3.75)
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
@@ -300,16 +331,7 @@ def generar_docx(registros, campo: str, logo_file) -> bytes:
             cell = tabla.cell(row_idx, col_idx)
             cell.text = ""
 
-            nombre = item["nombre"].strip() if item["nombre"].strip() else item["nombre_base"]
-
-            p_title = cell.paragraphs[0]
-            p_title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            p_title.space_after = Pt(4)
-            r_title = p_title.add_run(nombre)
-            r_title.bold = True
-            r_title.font.size = Pt(10)
-
-            p_img = cell.add_paragraph()
+            p_img = cell.paragraphs[0]
             p_img.alignment = WD_ALIGN_PARAGRAPH.CENTER
             agregar_imagen_a_word(p_img, abrir_imagen(item["file"]))
 
@@ -371,7 +393,6 @@ def inicializar_registros(files):
             "uid": f"{idx}_{f.name}_{getattr(f, 'size', 0)}",
             "file": f,
             "nombre_base": base,
-            "nombre": "",
         })
     return registros
 
@@ -403,6 +424,10 @@ with st.container(border=True):
         "Campo donde se realizó la videoscopía",
         placeholder="Ejemplo: Campo Tibú, Estación SANTS, GRB"
     )
+    cilindro = st.text_input(
+        "Cilindro",
+        placeholder="Ejemplo: 1L, 2R, 3, A"
+    )
     logo_file = st.file_uploader(
         "Logo para el pie de página, opcional",
         type=["png", "jpg", "jpeg"],
@@ -433,11 +458,8 @@ if uploaded_files:
     st.success(f"Se cargaron {len(registros)} imagen(es).")
 
     with st.container(border=True):
-        st.markdown("#### Reordenar imágenes y editar nombres")
-        st.caption(
-            "Escribe el nombre que debe aparecer encima de cada imagen. "
-            "Ejemplos: Cilindro 1L, Cilindro 2R, Válvula de escape, Culata."
-        )
+        st.markdown("#### Reordenar imágenes")
+        st.caption("Puedes cambiar el orden manualmente. Las imágenes no llevarán nombre ni título individual.")
 
         for idx, item in enumerate(registros):
             col1, col2, col3 = st.columns([1.3, 2.8, 1.2])
@@ -447,12 +469,7 @@ if uploaded_files:
                 st.image(img, use_container_width=True)
 
             with col2:
-                nuevo_nombre = st.text_input(
-                    f"Nombre {idx + 1}",
-                    value=item["nombre"],
-                    key=f"nombre_{item['uid']}"
-                )
-                item["nombre"] = nuevo_nombre
+                st.markdown(f"**Imagen {idx + 1}**")
                 st.caption(f"Archivo original: {item['file'].name}")
 
             with col3:
@@ -471,14 +488,30 @@ if uploaded_files:
 
     with st.expander("Ver orden final"):
         for idx, item in enumerate(registros, start=1):
-            nombre = item["nombre"].strip() if item["nombre"].strip() else item["nombre_base"]
-            st.write(f"{idx}. {nombre}")
+            st.write(f"{idx}. {item['file'].name}")
 
-    pdf_bytes = generar_pdf(registros, campo, logo_file)
-    word_bytes = generar_docx(registros, campo, logo_file)
+    pdf_bytes = generar_pdf(registros, campo, logo_file, cilindro)
 
-    col_pdf, col_word = st.columns(2)
-    with col_pdf:
+    if WORD_AVAILABLE:
+        word_bytes = generar_docx(registros, campo, logo_file, cilindro)
+        col_pdf, col_word = st.columns(2)
+        with col_pdf:
+            st.download_button(
+                label="📄 Descargar PDF de anexos",
+                data=pdf_bytes,
+                file_name=nombre_salida_pdf(),
+                mime="application/pdf",
+                use_container_width=True,
+            )
+        with col_word:
+            st.download_button(
+                label="📝 Descargar Word de anexos",
+                data=word_bytes,
+                file_name=nombre_salida_word(),
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+    else:
         st.download_button(
             label="📄 Descargar PDF de anexos",
             data=pdf_bytes,
@@ -486,14 +519,7 @@ if uploaded_files:
             mime="application/pdf",
             use_container_width=True,
         )
-    with col_word:
-        st.download_button(
-            label="📝 Descargar Word de anexos",
-            data=word_bytes,
-            file_name=nombre_salida_word(),
-            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            use_container_width=True,
-        )
+        st.warning("La exportación a Word no está disponible porque falta instalar python-docx en el entorno.")
 else:
     st.warning("Sube al menos una imagen para generar el documento.")
 
@@ -505,10 +531,12 @@ with st.container(border=True):
 - 2 columnas por página.
 - Máximo {MAX_PER_PAGE} imágenes por página.
 - Todas las imágenes conservan el mismo tamaño de presentación.
-- Cada imagen lleva el nombre escrito por el usuario encima.
+- Las imágenes no llevan nombre ni título individual.
+- Cada hoja lleva en la parte superior el título: ANEXOS FOTOGRÁFICO VIDEOSCOPIA CILINDRO X.
+- El valor de X lo ingresa el usuario.
 - Si no subes logo, la app usa el logo predeterminado de Mobil.
 - Pie de página con texto fijo a la izquierda, campo al centro y logo a la derecha.
-- Descarga disponible en PDF y Word.
+- Descarga disponible en PDF y también en Word si python-docx está instalado.
         """
     )
 
