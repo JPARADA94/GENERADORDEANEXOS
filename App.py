@@ -23,6 +23,7 @@ try:
 except Exception:
     WORD_AVAILABLE = False
 
+
 st.set_page_config(
     page_title="Anexos de videoscopía",
     page_icon="🖼️",
@@ -33,9 +34,11 @@ st.set_page_config(
 # CONFIGURACIÓN GENERAL
 # =========================================================
 PAGE_W, PAGE_H = letter
+
 COLUMNS = 2
-ROWS = 4
+ROWS = 3
 MAX_PER_PAGE = COLUMNS * ROWS
+
 DEFAULT_LOGO_PATH = "/mnt/data/image.png"
 
 
@@ -62,7 +65,7 @@ PDF_LINE_HEIGHT = 14
 
 
 # =========================================================
-# UTILIDADES
+# FUENTES PDF
 # =========================================================
 def registrar_fuentes_pdf():
     posibles = [
@@ -95,6 +98,7 @@ def registrar_fuentes_pdf():
         if regular and "ArialCustom" not in pdfmetrics.getRegisteredFontNames():
             pdfmetrics.registerFont(TTFont("ArialCustom", regular))
             PDF_FONT_REGULAR = "ArialCustom"
+
         if bold and "ArialCustomBold" not in pdfmetrics.getRegisteredFontNames():
             pdfmetrics.registerFont(TTFont("ArialCustomBold", bold))
             PDF_FONT_BOLD = "ArialCustomBold"
@@ -108,6 +112,9 @@ def registrar_fuentes_pdf():
 registrar_fuentes_pdf()
 
 
+# =========================================================
+# UTILIDADES
+# =========================================================
 def natural_key(name: str):
     parts = []
     current = ""
@@ -133,10 +140,8 @@ def natural_key(name: str):
     return parts
 
 
-
 def ordenar_archivos(files) -> List:
     return sorted(files, key=lambda f: natural_key(f.name))
-
 
 
 def abrir_imagen(file) -> Image.Image:
@@ -151,11 +156,9 @@ def abrir_imagen(file) -> Image.Image:
     return img
 
 
-
 def calcular_ajuste(img_w: int, img_h: int, box_w: float, box_h: float) -> Tuple[float, float]:
     ratio = min(box_w / img_w, box_h / img_h)
     return img_w * ratio, img_h * ratio
-
 
 
 def wrap_text_pdf(text: str, font_name: str, font_size: float, max_width: float, max_lines: int = 5) -> List[str]:
@@ -185,7 +188,6 @@ def wrap_text_pdf(text: str, font_name: str, font_size: float, max_width: float,
     return lines[:max_lines]
 
 
-
 def draw_justified_line(pdf: canvas.Canvas, words: List[str], x: float, y: float, width: float, font_name: str, font_size: float):
     if len(words) <= 1:
         pdf.drawString(x, y, " ".join(words))
@@ -195,18 +197,19 @@ def draw_justified_line(pdf: canvas.Canvas, words: List[str], x: float, y: float
     total_words_width = sum(word_widths)
     gaps = len(words) - 1
     total_space = width - total_words_width
+
     if total_space <= 0:
         pdf.drawString(x, y, " ".join(words))
         return
 
     gap_width = total_space / gaps
     cursor_x = x
+
     for i, word in enumerate(words):
         pdf.drawString(cursor_x, y, word)
         cursor_x += word_widths[i]
         if i < gaps:
             cursor_x += gap_width
-
 
 
 def draw_paragraph_continued(pdf: canvas.Canvas, label: str, text: str, x: float, y: float, total_width: float, max_lines: int = 5):
@@ -220,6 +223,7 @@ def draw_paragraph_continued(pdf: canvas.Canvas, label: str, text: str, x: float
 
     current = ""
     used_count = 0
+
     for idx, word in enumerate(words):
         test = f"{current} {word}".strip()
         if stringWidth(test, PDF_FONT_REGULAR, PDF_FONT_SIZE) <= first_line_width:
@@ -263,6 +267,7 @@ def draw_paragraph_continued(pdf: canvas.Canvas, label: str, text: str, x: float
         line_y = y - ((i + 1) * PDF_LINE_HEIGHT)
         line_words = line.split()
         is_last = i == len(other_lines) - 1
+
         if is_last:
             pdf.drawString(x, line_y, line)
         else:
@@ -275,7 +280,6 @@ def draw_paragraph_continued(pdf: canvas.Canvas, label: str, text: str, x: float
                 PDF_FONT_REGULAR,
                 PDF_FONT_SIZE,
             )
-
 
 
 def wrap_text_word(text: str, max_chars_per_line: int = 115, max_lines: int = 5) -> str:
@@ -304,14 +308,12 @@ def wrap_text_word(text: str, max_chars_per_line: int = 115, max_lines: int = 5)
     return "\n".join(lines[:max_lines])
 
 
-
 def obtener_logo_fuente(logo_file):
     if logo_file is not None:
         return logo_file
     if os.path.exists(DEFAULT_LOGO_PATH):
         return DEFAULT_LOGO_PATH
     return None
-
 
 
 def preparar_logo_pdf(logo_file, max_width=mm_to_pt(24), max_height=mm_to_pt(10)):
@@ -343,7 +345,6 @@ def dibujar_descripcion_pdf(pdf: canvas.Canvas, cilindro: str, descripcion: str)
     )
 
 
-
 def dibujar_footer_pdf(pdf: canvas.Canvas, campo: str, logo_reader, logo_w: float, logo_h: float):
     text_y = OUTER_MARGIN + mm_to_pt(1)
 
@@ -352,6 +353,7 @@ def dibujar_footer_pdf(pdf: canvas.Canvas, campo: str, logo_reader, logo_w: floa
 
     campo = (campo or "").strip()
     if campo:
+        pdf.setFont(PDF_FONT_BOLD, 9)
         pdf.drawCentredString(PAGE_W / 2, text_y, campo)
 
     if logo_reader:
@@ -368,22 +370,19 @@ def dibujar_footer_pdf(pdf: canvas.Canvas, campo: str, logo_reader, logo_w: floa
         )
 
 
-
-def generar_pdf(registros, campo: str, logo_file, cilindro: str, descripcion: str) -> bytes:
+def generar_pdf(paginas_config, campo: str, logo_file) -> bytes:
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=letter)
-
     logo_reader, logo_w, logo_h = preparar_logo_pdf(logo_file)
-    total_paginas = math.ceil(len(registros) / MAX_PER_PAGE)
 
-    for page_idx in range(total_paginas):
-        start = page_idx * MAX_PER_PAGE
-        end = start + MAX_PER_PAGE
-        lote = registros[start:end]
+    for page_idx, pagina in enumerate(paginas_config, start=1):
+        cilindro = pagina["cilindro"]
+        descripcion = pagina["descripcion"]
+        registros = pagina["registros"]
 
         dibujar_descripcion_pdf(pdf, cilindro, descripcion)
 
-        for i, item in enumerate(lote):
+        for i, item in enumerate(registros[:MAX_PER_PAGE]):
             row = i // COLUMNS
             col = i % COLUMNS
 
@@ -417,7 +416,7 @@ def generar_pdf(registros, campo: str, logo_file, cilindro: str, descripcion: st
 # =========================================================
 # WORD
 # =========================================================
-def agregar_imagen_a_word(parrafo, img: Image.Image, max_w_in=3.08, max_h_in=1.68):
+def agregar_imagen_a_word(parrafo, img: Image.Image, max_w_in=3.08, max_h_in=2.15):
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     try:
         img.save(temp.name, format="PNG")
@@ -425,13 +424,13 @@ def agregar_imagen_a_word(parrafo, img: Image.Image, max_w_in=3.08, max_h_in=1.6
         ratio = min((max_w_in * 96) / w_px, (max_h_in * 96) / h_px)
         final_w = w_px * ratio / 96
         final_h = h_px * ratio / 96
+
         run = parrafo.add_run()
         run.add_picture(temp.name, width=Inches(final_w), height=Inches(final_h))
     finally:
         temp.close()
         if os.path.exists(temp.name):
             os.unlink(temp.name)
-
 
 
 def agregar_logo_a_word(parrafo, logo_file, width_in=0.82):
@@ -450,8 +449,7 @@ def agregar_logo_a_word(parrafo, logo_file, width_in=0.82):
             os.unlink(temp.name)
 
 
-
-def generar_docx(registros, campo: str, logo_file, cilindro: str, descripcion: str) -> bytes:
+def generar_docx(paginas_config, campo: str, logo_file) -> bytes:
     if not WORD_AVAILABLE:
         return b""
 
@@ -468,12 +466,12 @@ def generar_docx(registros, campo: str, logo_file, cilindro: str, descripcion: s
     style.font.name = "Arial"
     style.font.size = Pt(12)
 
-    total_paginas = math.ceil(len(registros) / MAX_PER_PAGE)
+    total_paginas = len(paginas_config)
 
-    for page_idx in range(total_paginas):
-        start = page_idx * MAX_PER_PAGE
-        end = start + MAX_PER_PAGE
-        lote = registros[start:end]
+    for page_idx, pagina in enumerate(paginas_config):
+        cilindro = pagina["cilindro"]
+        descripcion = pagina["descripcion"]
+        registros = pagina["registros"]
 
         p_desc = doc.add_paragraph()
         p_desc.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -496,13 +494,13 @@ def generar_docx(registros, campo: str, logo_file, cilindro: str, descripcion: s
         tabla.autofit = False
 
         for row in tabla.rows:
-            row.height = Inches(2.05)
+            row.height = Inches(2.45)
             for cell in row.cells:
                 cell.width = Inches(3.75)
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
                 cell.text = ""
 
-        for i, item in enumerate(lote):
+        for i, item in enumerate(registros[:MAX_PER_PAGE]):
             r = i // COLUMNS
             c = i % COLUMNS
             cell = tabla.cell(r, c)
@@ -538,6 +536,7 @@ def generar_docx(registros, campo: str, logo_file, cilindro: str, descripcion: s
         p1.alignment = WD_ALIGN_PARAGRAPH.CENTER
         p1.paragraph_format.space_after = Pt(0)
         rm = p1.add_run((campo or "").strip())
+        rm.bold = True
         rm.font.name = "Arial"
         rm.font.size = Pt(9)
 
@@ -569,16 +568,23 @@ def inicializar_registros(files):
     return regs
 
 
-
 def mover_arriba(registros, idx):
     if idx > 0:
         registros[idx - 1], registros[idx] = registros[idx], registros[idx - 1]
 
 
-
 def mover_abajo(registros, idx):
     if idx < len(registros) - 1:
         registros[idx + 1], registros[idx] = registros[idx], registros[idx + 1]
+
+
+def dividir_registros_en_paginas(registros, num_paginas):
+    paginas = []
+    for i in range(num_paginas):
+        inicio = i * MAX_PER_PAGE
+        fin = inicio + MAX_PER_PAGE
+        paginas.append(registros[inicio:fin])
+    return paginas
 
 
 # =========================================================
@@ -588,10 +594,20 @@ st.title("🖼️ Generador de anexos de videoscopía")
 
 with st.container(border=True):
     st.markdown("#### Datos generales")
-    campo = st.text_input("Campo", placeholder="Ej: Estación SANTS")
-    cilindro = st.text_input("Cilindro", placeholder="Ej: 1L, 2R")
-    descripcion = st.text_area("Descripción de hallazgos", height=140)
-    logo_file = st.file_uploader("Logo opcional", type=["png", "jpg", "jpeg"], key="logo_uploader")
+    campo = st.text_input("Estación o campo", placeholder="Ej: Estación SANTS")
+
+    num_hojas = st.number_input(
+        "¿Cuántas hojas vas a generar? Una hoja = 1 cilindro",
+        min_value=1,
+        step=1,
+        value=1
+    )
+
+    logo_file = st.file_uploader(
+        "Logo opcional",
+        type=["png", "jpg", "jpeg"],
+        key="logo_uploader"
+    )
 
     if logo_file is None and os.path.exists(DEFAULT_LOGO_PATH):
         st.caption("Se usará el logo predeterminado de Mobil.")
@@ -636,24 +652,93 @@ if uploaded_files:
                 if st.button("⬆️ Subir", key=f"up_{item['uid']}", use_container_width=True):
                     mover_arriba(registros, idx)
                     st.rerun()
+
                 if st.button("⬇️ Bajar", key=f"down_{item['uid']}", use_container_width=True):
                     mover_abajo(registros, idx)
                     st.rerun()
 
-    with st.expander("Ver orden final"):
+    with st.expander("Ver orden final de imágenes"):
         for i, item in enumerate(registros, start=1):
             st.write(f"{i}. {item['file'].name}")
 
-    total_paginas = math.ceil(len(registros) / MAX_PER_PAGE)
-    st.info(f"Se generarán {total_paginas} página(s), con máximo {MAX_PER_PAGE} imágenes por página.")
+    st.info(
+        f"Configuración actual: {MAX_PER_PAGE} imágenes por hoja. "
+        f"Con {len(registros)} imagen(es) y {num_hojas} hoja(s), "
+        f"las imágenes se repartirán en orden, de 6 en 6."
+    )
 
-    pdf_bytes = generar_pdf(registros, campo, logo_file, cilindro, descripcion)
+    paginas_registros = dividir_registros_en_paginas(registros, int(num_hojas))
 
-    if WORD_AVAILABLE:
-        word_bytes = generar_docx(registros, campo, logo_file, cilindro, descripcion)
+    with st.container(border=True):
+        st.markdown("#### Datos por hoja")
+        st.caption("Cada hoja corresponde a un cilindro.")
 
-        col1, col2 = st.columns(2)
-        with col1:
+        paginas_config = []
+
+        for i in range(int(num_hojas)):
+            st.markdown(f"##### Hoja {i + 1}")
+            cilindro = st.text_input(
+                f"Cilindro hoja {i + 1}",
+                placeholder=f"Ej: {i + 1}L",
+                key=f"cilindro_{i}"
+            )
+            descripcion = st.text_area(
+                f"Descripción de hallazgos hoja {i + 1}",
+                height=120,
+                key=f"descripcion_{i}"
+            )
+
+            lote = paginas_registros[i] if i < len(paginas_registros) else []
+
+            if lote:
+                nombres = [x["file"].name for x in lote]
+                st.caption(f"Imágenes asignadas a esta hoja: {len(lote)}")
+                for nombre in nombres:
+                    st.write(f"• {nombre}")
+            else:
+                st.warning("Esta hoja no tiene imágenes asignadas.")
+
+            paginas_config.append({
+                "cilindro": cilindro,
+                "descripcion": descripcion,
+                "registros": lote,
+            })
+
+    generar_ok = True
+
+    total_capacidad = int(num_hojas) * MAX_PER_PAGE
+    if len(registros) > total_capacidad:
+        st.error(
+            f"Subiste {len(registros)} imágenes, pero con {num_hojas} hoja(s) "
+            f"la capacidad máxima es {total_capacidad}. "
+            f"Aumenta el número de hojas o reduce imágenes."
+        )
+        generar_ok = False
+
+    if generar_ok:
+        pdf_bytes = generar_pdf(paginas_config, campo, logo_file)
+
+        if WORD_AVAILABLE:
+            word_bytes = generar_docx(paginas_config, campo, logo_file)
+
+            col1, col2 = st.columns(2)
+            with col1:
+                st.download_button(
+                    "📄 Descargar PDF",
+                    data=pdf_bytes,
+                    file_name="anexos_videoscopia.pdf",
+                    mime="application/pdf",
+                    use_container_width=True,
+                )
+            with col2:
+                st.download_button(
+                    "📝 Descargar Word",
+                    data=word_bytes,
+                    file_name="anexos_videoscopia.docx",
+                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                    use_container_width=True,
+                )
+        else:
             st.download_button(
                 "📄 Descargar PDF",
                 data=pdf_bytes,
@@ -661,23 +746,7 @@ if uploaded_files:
                 mime="application/pdf",
                 use_container_width=True,
             )
-        with col2:
-            st.download_button(
-                "📝 Descargar Word",
-                data=word_bytes,
-                file_name="anexos_videoscopia.docx",
-                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                use_container_width=True,
-            )
-    else:
-        st.download_button(
-            "📄 Descargar PDF",
-            data=pdf_bytes,
-            file_name="anexos_videoscopia.pdf",
-            mime="application/pdf",
-            use_container_width=True,
-        )
-        st.warning("La exportación a Word no está disponible porque falta instalar python-docx.")
+            st.warning("La exportación a Word no está disponible porque falta instalar python-docx.")
 else:
     st.info("Sube imágenes para continuar.")
 
