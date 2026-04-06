@@ -47,7 +47,7 @@ def mm_to_pt(mm: float) -> float:
 OUTER_MARGIN = mm_to_pt(12)
 GAP_X = mm_to_pt(6)
 GAP_Y = mm_to_pt(6)
-FOOTER_H = mm_to_pt(12)
+FOOTER_H = mm_to_pt(14)
 DESC_BLOCK_H = mm_to_pt(30)
 TOP_SPACE = mm_to_pt(2)
 
@@ -147,8 +147,18 @@ def abrir_imagen(file) -> Image.Image:
         file.seek(0)
     img = Image.open(file)
     img = ImageOps.exif_transpose(img)
-    if img.mode not in ("RGB", "L"):
+    if img.mode not in ("RGB", "RGBA", "L"):
+        img = img.convert("RGBA")
+    elif img.mode == "L":
         img = img.convert("RGB")
+    return img
+
+
+def abrir_imagen_desde_bytes(data: bytes) -> Image.Image:
+    img = Image.open(io.BytesIO(data))
+    img = ImageOps.exif_transpose(img)
+    if img.mode not in ("RGB", "RGBA", "L"):
+        img = img.convert("RGBA")
     elif img.mode == "L":
         img = img.convert("RGB")
     return img
@@ -306,22 +316,37 @@ def wrap_text_word(text: str, max_chars_per_line: int = 115, max_lines: int = 5)
     return "\n".join(lines[:max_lines])
 
 
-def obtener_logo_fuente(logo_file):
+def obtener_logo_bytes(logo_file):
     if logo_file is not None:
-        return logo_file
+        try:
+            if hasattr(logo_file, "seek"):
+                logo_file.seek(0)
+            return logo_file.read()
+        except Exception:
+            return None
+
     if os.path.exists(DEFAULT_LOGO_PATH):
-        return DEFAULT_LOGO_PATH
+        try:
+            with open(DEFAULT_LOGO_PATH, "rb") as f:
+                return f.read()
+        except Exception:
+            return None
+
     return None
 
 
 def preparar_logo_pdf(logo_file, max_width=mm_to_pt(24), max_height=mm_to_pt(10)):
-    src = obtener_logo_fuente(logo_file)
-    if not src:
-        return None, 0, 0
+    logo_bytes = obtener_logo_bytes(logo_file)
+    if not logo_bytes:
+        return None, 0, 0, None
 
-    img = abrir_imagen(src)
-    draw_w, draw_h = calcular_ajuste(img.width, img.height, max_width, max_height)
-    return ImageReader(img), draw_w, draw_h
+    try:
+        img = abrir_imagen_desde_bytes(logo_bytes)
+        draw_w, draw_h = calcular_ajuste(img.width, img.height, max_width, max_height)
+        logo_reader = ImageReader(img)
+        return logo_reader, draw_w, draw_h, logo_bytes
+    except Exception:
+        return None, 0, 0, None
 
 
 def inicializar_registros(files, prefijo: str):
@@ -365,7 +390,7 @@ def dibujar_descripcion_pdf(pdf: canvas.Canvas, cilindro: str, descripcion: str)
 
 
 def dibujar_footer_pdf(pdf: canvas.Canvas, campo: str, logo_reader, logo_w: float, logo_h: float):
-    text_y = OUTER_MARGIN + mm_to_pt(1)
+    text_y = OUTER_MARGIN + mm_to_pt(4)
 
     pdf.setFont(PDF_FONT_REGULAR, 9)
     pdf.drawString(OUTER_MARGIN, text_y, "Lubricantes Mobil")
@@ -375,9 +400,9 @@ def dibujar_footer_pdf(pdf: canvas.Canvas, campo: str, logo_reader, logo_w: floa
         pdf.setFont(PDF_FONT_BOLD, 9)
         pdf.drawCentredString(PAGE_W / 2, text_y, campo)
 
-    if logo_reader:
+    if logo_reader and logo_w > 0 and logo_h > 0:
         x_logo = PAGE_W - OUTER_MARGIN - logo_w
-        y_logo = OUTER_MARGIN
+        y_logo = OUTER_MARGIN + mm_to_pt(1.5)
         pdf.drawImage(
             logo_reader,
             x_logo,
@@ -392,7 +417,8 @@ def dibujar_footer_pdf(pdf: canvas.Canvas, campo: str, logo_reader, logo_w: floa
 def generar_pdf(paginas_config, campo: str, logo_file) -> bytes:
     buffer = io.BytesIO()
     pdf = canvas.Canvas(buffer, pagesize=letter)
-    logo_reader, logo_w, logo_h = preparar_logo_pdf(logo_file)
+
+    logo_reader, logo_w, logo_h, _ = preparar_logo_pdf(logo_file)
 
     for pagina in paginas_config:
         cilindro = pagina["cilindro"]
@@ -453,11 +479,11 @@ def agregar_imagen_a_word(parrafo, img: Image.Image, max_w_in=3.08, max_h_in=2.1
 
 
 def agregar_logo_a_word(parrafo, logo_file, width_in=0.82):
-    src = obtener_logo_fuente(logo_file)
-    if not src:
+    logo_bytes = obtener_logo_bytes(logo_file)
+    if not logo_bytes:
         return
 
-    img = abrir_imagen(src)
+    img = abrir_imagen_desde_bytes(logo_bytes)
     temp = tempfile.NamedTemporaryFile(delete=False, suffix=".png")
     try:
         img.save(temp.name, format="PNG")
@@ -597,6 +623,8 @@ with st.container(border=True):
 
     if logo_file is None and os.path.exists(DEFAULT_LOGO_PATH):
         st.caption("Se usará el logo predeterminado de Mobil.")
+    elif logo_file is not None:
+        st.success("Logo cargado correctamente.")
 
 paginas_config = []
 
