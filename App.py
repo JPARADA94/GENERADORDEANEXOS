@@ -41,10 +41,8 @@ MAX_PER_PAGE = COLUMNS * ROWS
 
 DEFAULT_LOGO_PATH = "/mnt/data/image.png"
 
-
 def mm_to_pt(mm: float) -> float:
     return mm * 72 / 25.4
-
 
 OUTER_MARGIN = mm_to_pt(12)
 GAP_X = mm_to_pt(6)
@@ -326,6 +324,27 @@ def preparar_logo_pdf(logo_file, max_width=mm_to_pt(24), max_height=mm_to_pt(10)
     return ImageReader(img), draw_w, draw_h
 
 
+def inicializar_registros(files, prefijo: str):
+    ordenados = ordenar_archivos(files)
+    regs = []
+    for idx, f in enumerate(ordenados, start=1):
+        regs.append({
+            "uid": f"{prefijo}_{idx}_{f.name}_{getattr(f, 'size', 0)}",
+            "file": f,
+        })
+    return regs
+
+
+def mover_arriba(registros, idx):
+    if idx > 0:
+        registros[idx - 1], registros[idx] = registros[idx], registros[idx - 1]
+
+
+def mover_abajo(registros, idx):
+    if idx < len(registros) - 1:
+        registros[idx + 1], registros[idx] = registros[idx], registros[idx + 1]
+
+
 # =========================================================
 # PDF
 # =========================================================
@@ -375,14 +394,14 @@ def generar_pdf(paginas_config, campo: str, logo_file) -> bytes:
     pdf = canvas.Canvas(buffer, pagesize=letter)
     logo_reader, logo_w, logo_h = preparar_logo_pdf(logo_file)
 
-    for page_idx, pagina in enumerate(paginas_config, start=1):
+    for pagina in paginas_config:
         cilindro = pagina["cilindro"]
         descripcion = pagina["descripcion"]
-        registros = pagina["registros"]
+        registros = pagina["registros"][:MAX_PER_PAGE]
 
         dibujar_descripcion_pdf(pdf, cilindro, descripcion)
 
-        for i, item in enumerate(registros[:MAX_PER_PAGE]):
+        for i, item in enumerate(registros):
             row = i // COLUMNS
             col = i % COLUMNS
 
@@ -471,7 +490,7 @@ def generar_docx(paginas_config, campo: str, logo_file) -> bytes:
     for page_idx, pagina in enumerate(paginas_config):
         cilindro = pagina["cilindro"]
         descripcion = pagina["descripcion"]
-        registros = pagina["registros"]
+        registros = pagina["registros"][:MAX_PER_PAGE]
 
         p_desc = doc.add_paragraph()
         p_desc.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
@@ -500,7 +519,7 @@ def generar_docx(paginas_config, campo: str, logo_file) -> bytes:
                 cell.vertical_alignment = WD_CELL_VERTICAL_ALIGNMENT.CENTER
                 cell.text = ""
 
-        for i, item in enumerate(registros[:MAX_PER_PAGE]):
+        for i, item in enumerate(registros):
             r = i // COLUMNS
             c = i % COLUMNS
             cell = tabla.cell(r, c)
@@ -555,39 +574,6 @@ def generar_docx(paginas_config, campo: str, logo_file) -> bytes:
 
 
 # =========================================================
-# ESTADO Y ORDEN MANUAL
-# =========================================================
-def inicializar_registros(files):
-    ordenados = ordenar_archivos(files)
-    regs = []
-    for idx, f in enumerate(ordenados, start=1):
-        regs.append({
-            "uid": f"{idx}_{f.name}_{getattr(f, 'size', 0)}",
-            "file": f,
-        })
-    return regs
-
-
-def mover_arriba(registros, idx):
-    if idx > 0:
-        registros[idx - 1], registros[idx] = registros[idx], registros[idx - 1]
-
-
-def mover_abajo(registros, idx):
-    if idx < len(registros) - 1:
-        registros[idx + 1], registros[idx] = registros[idx], registros[idx + 1]
-
-
-def dividir_registros_en_paginas(registros, num_paginas):
-    paginas = []
-    for i in range(num_paginas):
-        inicio = i * MAX_PER_PAGE
-        fin = inicio + MAX_PER_PAGE
-        paginas.append(registros[inicio:fin])
-    return paginas
-
-
-# =========================================================
 # INTERFAZ
 # =========================================================
 st.title("🖼️ Generador de anexos de videoscopía")
@@ -612,133 +598,109 @@ with st.container(border=True):
     if logo_file is None and os.path.exists(DEFAULT_LOGO_PATH):
         st.caption("Se usará el logo predeterminado de Mobil.")
 
-uploaded_files = st.file_uploader(
-    "Sube imágenes",
-    type=["jpg", "jpeg", "png"],
-    accept_multiple_files=True,
-    key="images_uploader",
-)
+paginas_config = []
 
-if uploaded_files:
-    current_ids = [
-        f"{i}_{f.name}_{getattr(f, 'size', 0)}"
-        for i, f in enumerate(ordenar_archivos(uploaded_files), start=1)
-    ]
-
-    if "registros_imagenes" not in st.session_state:
-        st.session_state.registros_imagenes = inicializar_registros(uploaded_files)
-    else:
-        existing_ids = [r["uid"] for r in st.session_state.registros_imagenes]
-        if existing_ids != current_ids:
-            st.session_state.registros_imagenes = inicializar_registros(uploaded_files)
-
-    registros = st.session_state.registros_imagenes
-
-    st.success(f"Se cargaron {len(registros)} imagen(es).")
-
+for i in range(int(num_hojas)):
     with st.container(border=True):
-        st.markdown("#### Reordenar imágenes")
-        st.caption("Usa los botones para cambiar el orden final del anexo.")
+        st.markdown(f"#### Hoja {i + 1}")
 
-        for idx, item in enumerate(registros):
-            c1, c2 = st.columns([3, 1])
-
-            with c1:
-                st.image(abrir_imagen(item["file"]), use_container_width=True)
-                st.caption(item["file"].name)
-
-            with c2:
-                st.write("")
-                if st.button("⬆️ Subir", key=f"up_{item['uid']}", use_container_width=True):
-                    mover_arriba(registros, idx)
-                    st.rerun()
-
-                if st.button("⬇️ Bajar", key=f"down_{item['uid']}", use_container_width=True):
-                    mover_abajo(registros, idx)
-                    st.rerun()
-
-    with st.expander("Ver orden final de imágenes"):
-        for i, item in enumerate(registros, start=1):
-            st.write(f"{i}. {item['file'].name}")
-
-    st.info(
-        f"Configuración actual: {MAX_PER_PAGE} imágenes por hoja. "
-        f"Con {len(registros)} imagen(es) y {num_hojas} hoja(s), "
-        f"las imágenes se repartirán en orden, de 6 en 6."
-    )
-
-    paginas_registros = dividir_registros_en_paginas(registros, int(num_hojas))
-
-    with st.container(border=True):
-        st.markdown("#### Datos por hoja")
-        st.caption("Cada hoja corresponde a un cilindro.")
-
-        paginas_config = []
-
-        for i in range(int(num_hojas)):
-            st.markdown(f"##### Hoja {i + 1}")
-            cilindro = st.text_input(
-                f"Cilindro hoja {i + 1}",
-                placeholder=f"Ej: {i + 1}L",
-                key=f"cilindro_{i}"
-            )
-            descripcion = st.text_area(
-                f"Descripción de hallazgos hoja {i + 1}",
-                height=120,
-                key=f"descripcion_{i}"
-            )
-
-            lote = paginas_registros[i] if i < len(paginas_registros) else []
-
-            if lote:
-                nombres = [x["file"].name for x in lote]
-                st.caption(f"Imágenes asignadas a esta hoja: {len(lote)}")
-                for nombre in nombres:
-                    st.write(f"• {nombre}")
-            else:
-                st.warning("Esta hoja no tiene imágenes asignadas.")
-
-            paginas_config.append({
-                "cilindro": cilindro,
-                "descripcion": descripcion,
-                "registros": lote,
-            })
-
-    generar_ok = True
-
-    total_capacidad = int(num_hojas) * MAX_PER_PAGE
-    if len(registros) > total_capacidad:
-        st.error(
-            f"Subiste {len(registros)} imágenes, pero con {num_hojas} hoja(s) "
-            f"la capacidad máxima es {total_capacidad}. "
-            f"Aumenta el número de hojas o reduce imágenes."
+        cilindro = st.text_input(
+            f"Cilindro de la hoja {i + 1}",
+            placeholder=f"Ej: {i + 1}L",
+            key=f"cilindro_{i}"
         )
-        generar_ok = False
 
-    if generar_ok:
-        pdf_bytes = generar_pdf(paginas_config, campo, logo_file)
+        descripcion = st.text_area(
+            f"Descripción de hallazgos hoja {i + 1}",
+            height=120,
+            key=f"descripcion_{i}"
+        )
 
-        if WORD_AVAILABLE:
-            word_bytes = generar_docx(paginas_config, campo, logo_file)
+        uploaded_files = st.file_uploader(
+            f"Sube imágenes de la hoja {i + 1}",
+            type=["jpg", "jpeg", "png"],
+            accept_multiple_files=True,
+            key=f"images_uploader_{i}"
+        )
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.download_button(
-                    "📄 Descargar PDF",
-                    data=pdf_bytes,
-                    file_name="anexos_videoscopia.pdf",
-                    mime="application/pdf",
-                    use_container_width=True,
-                )
-            with col2:
-                st.download_button(
-                    "📝 Descargar Word",
-                    data=word_bytes,
-                    file_name="anexos_videoscopia.docx",
-                    mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-                    use_container_width=True,
-                )
+        registros_key = f"registros_imagenes_{i}"
+
+        if uploaded_files:
+            current_ids = [
+                f"{idx}_{f.name}_{getattr(f, 'size', 0)}"
+                for idx, f in enumerate(ordenar_archivos(uploaded_files), start=1)
+            ]
+
+            if registros_key not in st.session_state:
+                st.session_state[registros_key] = inicializar_registros(uploaded_files, prefijo=f"p{i}")
+            else:
+                existing_ids = [r["uid"].split("_", 2)[-1] for r in st.session_state[registros_key]]
+                if len(existing_ids) != len(current_ids):
+                    st.session_state[registros_key] = inicializar_registros(uploaded_files, prefijo=f"p{i}")
+                else:
+                    nuevos = [f.name for f in ordenar_archivos(uploaded_files)]
+                    anteriores = [r["file"].name for r in st.session_state[registros_key]]
+                    if nuevos != anteriores:
+                        st.session_state[registros_key] = inicializar_registros(uploaded_files, prefijo=f"p{i}")
+
+            registros = st.session_state[registros_key]
+
+            if len(registros) > MAX_PER_PAGE:
+                st.error(f"Esta hoja permite máximo {MAX_PER_PAGE} imágenes.")
+            else:
+                st.success(f"Se cargaron {len(registros)} imagen(es) en esta hoja.")
+
+            if registros:
+                st.markdown("##### Reordenar imágenes de esta hoja")
+                st.caption("Usa los botones para organizar el orden final dentro de esta hoja.")
+
+                for idx, item in enumerate(registros):
+                    c1, c2 = st.columns([3, 1])
+
+                    with c1:
+                        st.image(abrir_imagen(item["file"]), use_container_width=True)
+                        st.caption(item["file"].name)
+
+                    with c2:
+                        st.write("")
+                        if st.button("⬆️ Subir", key=f"up_{i}_{item['uid']}", use_container_width=True):
+                            mover_arriba(registros, idx)
+                            st.rerun()
+
+                        if st.button("⬇️ Bajar", key=f"down_{i}_{item['uid']}", use_container_width=True):
+                            mover_abajo(registros, idx)
+                            st.rerun()
+
+                with st.expander(f"Ver orden final hoja {i + 1}"):
+                    for pos, item in enumerate(registros, start=1):
+                        st.write(f"{pos}. {item['file'].name}")
         else:
+            registros = []
+            st.info("Sube imágenes para esta hoja.")
+
+        paginas_config.append({
+            "cilindro": cilindro,
+            "descripcion": descripcion,
+            "registros": registros,
+        })
+
+# =========================================================
+# VALIDACIÓN Y DESCARGA
+# =========================================================
+exceso = False
+for idx, pagina in enumerate(paginas_config, start=1):
+    if len(pagina["registros"]) > MAX_PER_PAGE:
+        st.error(f"La hoja {idx} supera el límite de {MAX_PER_PAGE} imágenes.")
+        exceso = True
+
+if paginas_config and not exceso:
+    pdf_bytes = generar_pdf(paginas_config, campo, logo_file)
+
+    if WORD_AVAILABLE:
+        word_bytes = generar_docx(paginas_config, campo, logo_file)
+
+        col1, col2 = st.columns(2)
+        with col1:
             st.download_button(
                 "📄 Descargar PDF",
                 data=pdf_bytes,
@@ -746,9 +708,23 @@ if uploaded_files:
                 mime="application/pdf",
                 use_container_width=True,
             )
-            st.warning("La exportación a Word no está disponible porque falta instalar python-docx.")
-else:
-    st.info("Sube imágenes para continuar.")
+        with col2:
+            st.download_button(
+                "📝 Descargar Word",
+                data=word_bytes,
+                file_name="anexos_videoscopia.docx",
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True,
+            )
+    else:
+        st.download_button(
+            "📄 Descargar PDF",
+            data=pdf_bytes,
+            file_name="anexos_videoscopia.pdf",
+            mime="application/pdf",
+            use_container_width=True,
+        )
+        st.warning("La exportación a Word no está disponible porque falta instalar python-docx.")
 
 with st.container(border=True):
     st.markdown("#### requirements.txt")
@@ -762,4 +738,3 @@ python-docx""",
 
     st.markdown("#### Ejecución local")
     st.code("streamlit run App.py", language="bash")
-
